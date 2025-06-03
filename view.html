@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizar Finanças Mensais</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Minhas Finanças por Mês</h1>
+            <nav><a href="index.html">← Voltar ao Início</a></nav>
+        </header>
+
+        <section class="filter-month">
+            <h2>Selecione o Mês</h2>
+            <div class="form-group">
+                <label for="month-select-view">Mês de Visualização:</label>
+                <select id="month-select-view">
+                    <option value="all">Todos os Meses</option>
+                    <option value="06/2025">Junho/2025</option>
+                    <option value="07/2025">Julho/2025</option>
+                    <option value="08/2025">Agosto/2025</option>
+                    <option value="09/2025">Setembro/2025</option>
+                    <option value="10/2025">Outubro/2025</option>
+                    <option value="11/2025">Novembro/2025</option>
+                    <option value="12/2025">Dezembro/2025</option>
+                    <option value="01/2026">Janeiro/2026</option>
+                    <option value="02/2026">Fevereiro/2026</option>
+                    <option value="03/2026">Março/2026</option>
+                    <option value="04/2026">Abril/2026</option>
+                    <option value="05/2026">Maio/2026</option>
+                    <option value="06/2026">Junho/2026</option>
+                </select>
+            </div>
+        </section>
+
+        <section class="summary">
+            <h2>Resumo do Mês Selecionado</h2>
+            <p>Total de Receitas: <span id="total-income">R$ 0.00</span></p>
+            <p>Total de Despesas: <span id="total-expense">R$ 0.00</span></p>
+            <p>Saldo Atual: <span id="current-balance">R$ 0.00</span></p>
+        </section>
+
+        <section class="transaction-list">
+            <h2>Histórico de Transações do Mês Selecionado</h2>
+            <ul id="transactions">
+                </ul>
+        </section>
+    </div>
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>

@@ -5,16 +5,20 @@ const SHEETSDB_API_BASE_URL = 'https://sheetdb.io/api/v1/ovo0p2ncfaknr';
 const RECEITAS_API_URL = `${SHEETSDB_API_BASE_URL}?sheet=Receitas`;
 const DESPESAS_API_URL = `${SHEETSDB_API_BASE_URL}?sheet=Despesas`;
 
-// --- 2. REFERÊNCIAS DOS ELEMENTOS HTML ---
-const transactionForm = document.getElementById('transaction-form');
-const descriptionInput = document.getElementById('description');
-const amountInput = document.getElementById('amount');
-const typeInput = document.getElementById('type'); // Este é o select: 'expense' ou 'income'
-const transactionsList = document.getElementById('transactions');
-const totalIncomeSpan = document.getElementById('total-income');
-const totalExpenseSpan = document.getElementById('total-expense');
-const currentBalanceSpan = document.getElementById('current-balance');
-const monthSelect = document.getElementById('month-select'); // O ÚNICO seletor de mês
+// --- 2. REFERÊNCIAS DOS ELEMENTOS HTML (Variáveis, dependendo da página) ---
+// Elementos comuns (podem existir em ambas as páginas ou em apenas uma, mas declaramos aqui)
+let transactionForm = null;
+let descriptionInput = null;
+let amountInput = null;
+let typeInput = null;
+let monthSelectAdd = null; // Apenas em add.html
+
+let monthSelectView = null; // Apenas em view.html
+
+let transactionsList = null;
+let totalIncomeSpan = null;
+let totalExpenseSpan = null;
+let currentBalanceSpan = null;
 
 let allLoadedTransactions = []; // Armazena todas as transações carregadas para filtragem
 let totalIncome = 0;
@@ -49,7 +53,7 @@ async function addTransactionToSheetsDB(transactionData, type) {
     bodyData.descricao = transactionData.description;
     bodyData.timestamp = transactionData.timestamp;
     bodyData.id = transactionData.id;
-    bodyData.mesReferencia = normalizeMmYyyy(transactionData.mesReferencia); // Normaliza antes de enviar
+    bodyData.mesReferencia = transactionData.mesReferencia;
 
     if (type === 'income') {
         bodyData.valorEntrada = transactionData.amount;
@@ -125,7 +129,7 @@ async function getAllTransactionsFromSheetsDB() {
             description: item.descricao,
             amount: parseFloat(item.valorEntrada),
             type: 'income',
-            mesReferencia: normalizeMmYyyy(item.mesReferencia), // Normaliza ao ler também!
+            mesReferencia: normalizeMmYyyy(item.mesReferencia),
             timestamp: item.timestamp,
             id: item.id
         }));
@@ -142,15 +146,22 @@ async function getAllTransactionsFromSheetsDB() {
             description: item.descricao,
             amount: parseFloat(item.valorSaida),
             type: 'expense',
-            mesReferencia: normalizeMmYyyy(item.mesReferencia), // Normaliza ao ler também!
+            mesReferencia: normalizeMmYyyy(item.mesReferencia),
             timestamp: item.timestamp,
             id: item.id
         }));
         allTransactions = allTransactions.concat(expenses);
 
-        // Ordena todas as transações combinadas por timestamp (mais recentes primeiro)
+        // Ordena todas as transações combinadas por mesReferencia (MM/YYYY) e depois por timestamp (mais recentes primeiro)
         allTransactions.sort((a, b) => {
-            return new Date(b.timestamp) - new Date(a.timestamp);
+            // Converte MM/YYYY para YYYYMM para ordenação correta como string
+            const mesAnoA = a.mesReferencia.split('/')[1] + a.mesReferencia.split('/')[0];
+            const mesAnoB = b.mesReferencia.split('/')[1] + b.mesReferencia.split('/')[0];
+
+            if (mesAnoA === mesAnoB) {
+                return new Date(b.timestamp) - new Date(a.timestamp);
+            }
+            return mesAnoB.localeCompare(mesAnoA); // Ordena YYYYMM decrescente
         });
 
         return allTransactions;
@@ -163,7 +174,7 @@ async function getAllTransactionsFromSheetsDB() {
 }
 
 
-// --- 5. FUNÇÕES DE UI E CÁLCULOS ---
+// --- 5. FUNÇÕES DE UI E CÁLCULOS (Comuns às páginas) ---
 
 function addTransactionToDOM(transaction) {
     const listItem = document.createElement('li');
@@ -172,7 +183,6 @@ function addTransactionToDOM(transaction) {
     const sign = transaction.type === 'expense' ? '-' : '+';
     const amountClass = transaction.type === 'expense' ? 'negative' : 'positive';
 
-    // Inclui o mês de referência na exibição
     listItem.innerHTML = `
         <span>${transaction.description} (${transaction.mesReferencia})</span> 
         <span class="${amountClass}">${sign} ${formatCurrency(transaction.amount)}</span>
@@ -180,20 +190,29 @@ function addTransactionToDOM(transaction) {
     `;
     transactionsList.appendChild(listItem);
 
+    // Adiciona listener para o botão de deletar no DOM
     listItem.querySelector('.delete-btn').addEventListener('click', async (e) => {
         const transactionId = e.target.dataset.id;
         const transactionType = e.target.dataset.type;
 
         try {
             await deleteTransactionFromSheetsDB(transactionId, transactionType);
-            loadAndFilterTransactions(); // Recarrega e filtra após a deleção
+            // No caso de deleção, precisamos recarregar e filtrar/exibir as transações apropriadas
+            // Isso será feito pela função de carregamento da página específica
+            if (window.location.pathname.includes('view.html')) {
+                loadAndFilterTransactionsViewPage(); // Para a página de visualização
+            } else if (window.location.pathname.includes('add.html')) {
+                // Se estiver na página de adição, apenas recarregar para mostrar que sumiu
+                loadAllTransactionsAddPage(); 
+            }
+            // Não há resumo nas funções de addTransactionToDOM, updateSummary é chamada após isso.
         } catch (error) {
             console.error("Erro ao deletar transação no DOM:", error);
         }
     });
 }
 
-function updateSummary(transactionsToSum) { // Recebe as transações a serem somadas (filtradas)
+function updateSummary(transactionsToSum) { 
     totalIncome = 0;
     totalExpense = 0;
 
@@ -219,37 +238,144 @@ function updateSummary(transactionsToSum) { // Recebe as transações a serem so
     }
 }
 
-// Função para carregar TODAS as transações e, em seguida, aplicar o filtro inicial
-async function loadAndFilterTransactions() {
+
+// --- 6. LÓGICA ESPECÍFICA PARA CADA PÁGINA ---
+
+// --- Lógica para add.html ---
+async function setupAddPage() {
+    transactionForm = document.getElementById('transaction-form');
+    descriptionInput = document.getElementById('description');
+    amountInput = document.getElementById('amount');
+    monthSelectAdd = document.getElementById('month-select-add');
+    typeInput = document.getElementById('type');
+
+    // Elementos da lista e resumo para feedback em add.html
+    transactionsList = document.getElementById('transactions');
+    totalIncomeSpan = document.getElementById('total-income'); // Podem não existir no add.html completo
+    totalExpenseSpan = document.getElementById('total-expense');
+    currentBalanceSpan = document.getElementById('current-balance');
+
+    // Se houver resumo na página de adição, carregue as transações para ele
+    if (transactionsList && totalIncomeSpan && totalExpenseSpan && currentBalanceSpan) {
+        loadAllTransactionsAddPage();
+    }
+
+    transactionForm.addEventListener('submit', async (e) => {
+        e.preventDefault(); 
+
+        const description = descriptionInput.value;
+        const amount = parseFloat(amountInput.value);
+        const mesReferencia = monthSelectAdd.value; // Pega o valor do seletor de mês
+        const type = typeInput.value; 
+
+        if (!mesReferencia) { // Valida se um mês foi selecionado
+            alert('Por favor, selecione um mês de referência.');
+            return;
+        }
+
+        if (description && amount) {
+            const newTransaction = {
+                description,
+                amount,
+                type,
+                mesReferencia, 
+                timestamp: new Date().toISOString(), 
+                id: generateUniqueId() 
+            };
+
+            try {
+                await addTransactionToSheetsDB(newTransaction, type);
+                console.log("Transação adicionada com sucesso no SheetsDB!");
+                alert("Transação adicionada com sucesso!"); // Feedback direto para o usuário
+                
+                // Se houver resumo na página de adição, recarregue
+                if (transactionsList) {
+                    loadAllTransactionsAddPage(); 
+                }
+
+                // Limpa o formulário para a próxima entrada
+                descriptionInput.value = '';
+                amountInput.value = '';
+                typeInput.value = 'expense'; 
+            } catch (error) {
+                console.error("Erro ao adicionar transação ao SheetsDB:", error);
+                alert("Ocorreu um erro ao adicionar a transação. Verifique o console.");
+            }
+        } else {
+            alert('Por favor, preencha todos os campos (descrição e valor).');
+        }
+    });
+
+     // Opcional: pré-selecionar o mês atual no seletor de adição
+    const currentDate = new Date();
+    const currentMonthFormatted = `${(currentDate.getMonth() + 1).toString().padStart(2, '0')}/${currentDate.getFullYear()}`; 
+    if (monthSelectAdd.querySelector(`option[value="${currentMonthFormatted}"]`)) {
+        monthSelectAdd.value = currentMonthFormatted;
+    }
+}
+
+// Carrega todas as transações para exibição na página de adição (se aplicável)
+async function loadAllTransactionsAddPage() {
+    if (!transactionsList) return; // Garante que o elemento existe
+    
+    transactionsList.innerHTML = ''; 
+    totalIncome = 0; 
+    totalExpense = 0;
+
+    allLoadedTransactions = await getAllTransactionsFromSheetsDB(); // Carrega tudo
+
+    if (allLoadedTransactions.length === 0) {
+        console.log('Nenhuma transação encontrada.');
+        updateSummary([]);
+        return;
+    }
+
+    allLoadedTransactions.forEach(transaction => {
+        // Exibe todas as transações na página de adição
+        addTransactionToDOM(transaction);
+    });
+    updateSummary(allLoadedTransactions); // Atualiza resumo para o total geral
+}
+
+
+// --- Lógica para view.html ---
+async function setupViewPage() {
+    monthSelectView = document.getElementById('month-select-view');
+    transactionsList = document.getElementById('transactions');
+    totalIncomeSpan = document.getElementById('total-income');
+    totalExpenseSpan = document.getElementById('total-expense');
+    currentBalanceSpan = document.getElementById('current-balance');
+
+    // Define o listener para o seletor de filtro
+    monthSelectView.addEventListener('change', filterTransactionsByMonth);
+
+    // Carrega todas as transações e aplica o filtro inicial
+    await loadAndFilterTransactionsViewPage();
+}
+
+async function loadAndFilterTransactionsViewPage() {
     allLoadedTransactions = await getAllTransactionsFromSheetsDB(); // Carrega TUDO
 
-    // Seleciona o mês atual no seletor quando a página carrega, se for uma opção válida.
-    // Isso garante que o filtro inicial seja sempre para o mês atual, se ele existir.
+    // Seleciona o mês atual no seletor de filtro quando a página carrega.
     const currentDate = new Date();
-    // Formato MM/YYYY
     const currentMonthFormatted = `${(currentDate.getMonth() + 1).toString().padStart(2, '0')}/${currentDate.getFullYear()}`; 
     
-    if (monthSelect.querySelector(`option[value="${currentMonthFormatted}"]`)) {
-        monthSelect.value = currentMonthFormatted;
+    if (monthSelectView.querySelector(`option[value="${currentMonthFormatted}"]`)) {
+        monthSelectView.value = currentMonthFormatted;
     } else {
-        // Se o mês atual não for uma opção (ex: no início do projeto sem dados para o mês),
-        // ou se não for encontrado no HTML, seleciona "Todos os Meses".
-        monthSelect.value = 'all'; 
+        monthSelectView.value = 'all'; // Default para "Todos os Meses"
     }
 
     filterTransactionsByMonth(); // Aplica o filtro com o mês selecionado
 }
 
-// Função para filtrar e exibir transações com base no mês selecionado
 function filterTransactionsByMonth() {
-    const selectedMonthValue = monthSelect.value; // Valor do único seletor (MM/YYYY ou 'all')
+    const selectedMonthValue = monthSelectView.value; // Valor do seletor de filtro (MM/YYYY ou 'all')
     let filteredTransactions = [];
 
     if (selectedMonthValue === 'all') {
-        filteredTransactions = allLoadedTransactions; // Exibe tudo
+        filteredTransactions = allLoadedTransactions;
     } else {
-        // Filtra transações onde 'mesReferencia' (que já está em MM/YYYY na planilha e normalizado)
-        // corresponde ao valor selecionado no select.
         filteredTransactions = allLoadedTransactions.filter(t => 
             t.mesReferencia === selectedMonthValue
         );
@@ -259,71 +385,32 @@ function filterTransactionsByMonth() {
 
     if (filteredTransactions.length === 0) {
         console.log('Nenhuma transação encontrada para o mês selecionado.');
-        updateSummary([]); // Atualiza o resumo com valores zero
+        updateSummary([]);
         return;
     }
 
     // Ordena as transações filtradas por timestamp (mais recentes primeiro)
     filteredTransactions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-    // Adiciona as transações filtradas ao DOM
     filteredTransactions.forEach(transaction => {
         addTransactionToDOM(transaction);
     });
     updateSummary(filteredTransactions); // Atualiza o resumo APENAS com as transações filtradas
 }
 
-// --- 6. EVENT LISTENERS ---
 
-// Listener para o evento de envio do formulário de transações
-transactionForm.addEventListener('submit', async (e) => {
-    e.preventDefault(); 
+// --- 7. INICIALIZAÇÃO COM BASE NA PÁGINA ATUAL ---
 
-    const description = descriptionInput.value;
-    const amount = parseFloat(amountInput.value);
-    // Pega o mês de referência diretamente do ÚNICO seletor de mês (o que está sendo visualizado e filtrado)
-    const mesReferencia = monthSelect.value; 
-    const type = typeInput.value; 
+document.addEventListener('DOMContentLoaded', () => {
+    const path = window.location.pathname;
 
-    // Se o mês selecionado for "Todos os Meses", não podemos adicionar a ele, pois não é um mês específico.
-    if (mesReferencia === 'all') {
-        alert('Por favor, selecione um mês específico no campo "Mês de Referência" para adicionar a transação.');
-        return;
-    }
-
-    if (description && amount && mesReferencia) {
-        const newTransaction = {
-            description,
-            amount,
-            type,
-            mesReferencia, 
-            timestamp: new Date().toISOString(), 
-            id: generateUniqueId() 
-        };
-
-        try {
-            await addTransactionToSheetsDB(newTransaction, type);
-            console.log("Transação adicionada com sucesso no SheetsDB!");
-            
-            // Após adicionar, recarrega TUDO e aplica o filtro novamente (o mês selecionado permanece)
-            await loadAndFilterTransactions(); 
-
-            // Limpa o formulário para a próxima entrada
-            descriptionInput.value = '';
-            amountInput.value = '';
-            // O seletor de mês não precisa ser resetado, pois ele mantém o mês selecionado
-            typeInput.value = 'expense'; 
-        } catch (error) {
-            console.error("Erro ao adicionar transação ao SheetsDB:", error);
-            alert("Ocorreu um erro ao adicionar a transação. Verifique o console.");
-        }
+    if (path.includes('add.html')) {
+        setupAddPage();
+    } else if (path.includes('view.html')) {
+        setupViewPage();
     } else {
-        alert('Por favor, preencha todos os campos (descrição, valor e mês).');
+        // Se for index.html ou outra página, não faz nada específico no script.js
+        // Ou você pode adicionar uma lógica para a página inicial aqui se necessário
+        console.log("Página inicial ou desconhecida.");
     }
 });
-
-// Listener para a mudança no ÚNICO seletor de mês
-monthSelect.addEventListener('change', filterTransactionsByMonth);
-
-// Carregar todas as transações e aplicar o filtro inicial ao iniciar a página
-document.addEventListener('DOMContentLoaded', loadAndFilterTransactions);
