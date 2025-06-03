@@ -14,9 +14,9 @@ const transactionsList = document.getElementById('transactions');
 const totalIncomeSpan = document.getElementById('total-income');
 const totalExpenseSpan = document.getElementById('total-expense');
 const currentBalanceSpan = document.getElementById('current-balance');
-const monthSelect = document.getElementById('month-select'); // O ÚNICO seletor de mês, agora populado via HTML
+const monthSelect = document.getElementById('month-select'); // O ÚNICO seletor de mês
 
-let allLoadedTransactions = []; // Ainda armazena todas as transações carregadas para filtragem
+let allLoadedTransactions = []; // Armazena todas as transações carregadas para filtragem
 let totalIncome = 0;
 let totalExpense = 0;
 
@@ -32,14 +32,16 @@ function generateUniqueId() {
     return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
 }
 
-// Função para converter MM/YYYY para YYYY-MM para fácil comparação e ordenação
-function convertMmYyyyToYyyyMm(mmYyyyString) {
-    if (!mmYyyyString || !mmYyyyString.includes('/')) {
-        return '';
-    }
+// Função para formatar 'MM/YYYY' para um nome de mês legível (para exibição no select)
+function formatMonthForDisplay(mmYyyyString) {
+    if (!mmYyyyString || !mmYyyyString.includes('/')) return mmYyyyString;
     const [month, year] = mmYyyyString.split('/');
-    return `${year}-${month.padStart(2, '0')}`; // Garante MM com dois dígitos
+    const date = new Date(year, parseInt(month) - 1); // Mês é 0-indexado
+    const options = { year: 'numeric', month: 'long' };
+    return date.toLocaleDateString('pt-BR', options);
 }
+
+// Não precisamos mais de convertMmYyyyToYyyyMm, pois compararemos diretamente MM/YYYY
 
 // --- 4. FUNÇÕES DE OPERAÇÃO COM SHEETSDB ---
 
@@ -51,7 +53,7 @@ async function addTransactionToSheetsDB(transactionData, type) {
     bodyData.descricao = transactionData.description;
     bodyData.timestamp = transactionData.timestamp;
     bodyData.id = transactionData.id;
-    bodyData.mesReferencia = transactionData.mesReferencia;
+    bodyData.mesReferencia = transactionData.mesReferencia; // Salva como MM/YYYY
 
     if (type === 'income') {
         bodyData.valorEntrada = transactionData.amount;
@@ -127,7 +129,7 @@ async function getAllTransactionsFromSheetsDB() {
             description: item.descricao,
             amount: parseFloat(item.valorEntrada),
             type: 'income',
-            mesReferencia: item.mesReferencia, 
+            mesReferencia: item.mesReferencia, // Pegando o valor como MM/YYYY
             timestamp: item.timestamp,
             id: item.id
         }));
@@ -144,21 +146,16 @@ async function getAllTransactionsFromSheetsDB() {
             description: item.descricao,
             amount: parseFloat(item.valorSaida),
             type: 'expense',
-            mesReferencia: item.mesReferencia, 
+            mesReferencia: item.mesReferencia, // Pegando o valor como MM/YYYY
             timestamp: item.timestamp,
             id: item.id
         }));
         allTransactions = allTransactions.concat(expenses);
 
-        // Ordena todas as transações combinadas por mesReferencia (YYYY-MM) e depois por timestamp (mais recentes primeiro)
+        // Ordena todas as transações combinadas por timestamp (mais recentes primeiro)
+        // A ordenação por mesReferencia será feita indiretamente pelo filtro.
         allTransactions.sort((a, b) => {
-            const mesAnoA = convertMmYyyyToYyyyMm(a.mesReferencia || ''); 
-            const mesAnoB = convertMmYyyyToYyyyMm(b.mesReferencia || ''); 
-
-            if (mesAnoA === mesAnoB) {
-                return new Date(b.timestamp) - new Date(a.timestamp);
-            }
-            return mesAnoB.localeCompare(mesAnoA); 
+            return new Date(b.timestamp) - new Date(a.timestamp);
         });
 
         return allTransactions;
@@ -227,23 +224,22 @@ function updateSummary(transactionsToSum) { // Recebe as transações a serem so
     }
 }
 
-// A função populateMonthSelect não é mais necessária, pois o HTML preenche o seletor.
+// A função populateMonthSelect não é mais necessária para preencher o seletor.
+// Ele será preenchido fixamente no HTML.
 
 // Função para carregar TODAS as transações e, em seguida, aplicar o filtro inicial
 async function loadAndFilterTransactions() {
     allLoadedTransactions = await getAllTransactionsFromSheetsDB(); // Carrega TUDO
 
-    // Seleciona o mês atual se ele existir no seletor, caso contrário, seleciona "Todos os Meses"
+    // Tenta selecionar o mês atual no seletor quando a página carrega.
+    // Se o mês atual não for uma opção válida, seleciona "Todos os Meses".
     const currentDate = new Date();
-    const currentMonthFormatted = `${(currentDate.getMonth() + 1).toString().padStart(2, '0')}/${currentDate.getFullYear()}`; // MM/YYYY
-    const currentMonthYyyyMm = convertMmYyyyToYyyyMm(currentMonthFormatted); // YYYY-MM
-
+    // Formato MM/YYYY
+    const currentMonthFormatted = `${(currentDate.getMonth() + 1).toString().padStart(2, '0')}/${currentDate.getFullYear()}`; 
+    
     if (monthSelect.querySelector(`option[value="${currentMonthFormatted}"]`)) {
         monthSelect.value = currentMonthFormatted;
-    } else if (monthSelect.querySelector(`option[value="${currentMonthYyyyMm}"]`)) { // Tenta com YYYY-MM se o value estiver nesse formato
-        monthSelect.value = currentMonthYyyyMm;
-    }
-    else {
+    } else {
         monthSelect.value = 'all'; // Default para "Todos os Meses"
     }
 
@@ -291,13 +287,13 @@ transactionForm.addEventListener('submit', async (e) => {
 
     const description = descriptionInput.value;
     const amount = parseFloat(amountInput.value);
-    // Pega o mês de referência diretamente do ÚNICO seletor de mês (o que está sendo visualizado)
+    // Pega o mês de referência diretamente do ÚNICO seletor de mês (o que está sendo visualizado e filtrado)
     const mesReferencia = monthSelect.value; 
     const type = typeInput.value; 
 
-    // Se o mês selecionado for "Todos os Meses", não podemos adicionar a ele
+    // Se o mês selecionado for "Todos os Meses", não podemos adicionar a ele, pois não é um mês específico.
     if (mesReferencia === 'all') {
-        alert('Por favor, selecione um mês específico no filtro para adicionar a transação.');
+        alert('Por favor, selecione um mês específico no campo "Mês de Referência" para adicionar a transação.');
         return;
     }
 
@@ -315,7 +311,7 @@ transactionForm.addEventListener('submit', async (e) => {
             await addTransactionToSheetsDB(newTransaction, type);
             console.log("Transação adicionada com sucesso no SheetsDB!");
             
-            // Após adicionar, recarrega TUDO e filtra novamente (mantendo o mês selecionado)
+            // Após adicionar, recarrega TUDO e aplica o filtro novamente (o mês selecionado permanece)
             await loadAndFilterTransactions(); 
 
             // Limpa o formulário para a próxima entrada
@@ -335,5 +331,5 @@ transactionForm.addEventListener('submit', async (e) => {
 // Listener para a mudança no ÚNICO seletor de mês
 monthSelect.addEventListener('change', filterTransactionsByMonth);
 
-// Carregar todas as transações e popular o seletor de meses ao iniciar a página
+// Carregar todas as transações e aplicar o filtro inicial ao iniciar a página
 document.addEventListener('DOMContentLoaded', loadAndFilterTransactions);
