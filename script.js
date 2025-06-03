@@ -38,8 +38,34 @@ function generateUniqueId() {
 
 // Função para normalizar MM/YYYY para sempre ter 2 dígitos no mês (ex: 6/2025 -> 06/2025)
 function normalizeMmYyyy(mmYyyyString) {
-    if (!mmYyyyString || !mmYyyyString.includes('/')) return mmYyyyString;
-    const [month, year] = mmYyyyString.split('/');
+    // Garante que a entrada seja uma string antes de tentar split
+    const strValue = String(mmYyyyString); 
+    if (!strValue || !strValue.includes('/')) {
+        // Se não tiver '/', tenta converter de número para MM/YYYY (se for um número de data Excel)
+        if (!isNaN(strValue) && !isNaN(parseFloat(strValue))) {
+            const excelDate = parseFloat(strValue);
+            // Excel dates start from 1900-01-01 (day 1). JS dates start from 1970-01-01.
+            // Excel date 1 is Jan 1, 1900. JS date 0 is Jan 1, 1970.
+            // Difference is 25569 days from 1900-01-01 to 1970-01-01.
+            // Also, Excel erroneously considers 1900 a leap year, so subtract 1 more day if > 28 Feb 1900.
+            const jsDate = new Date(Math.round((excelDate - 25569) * 86400 * 1000));
+            
+            // Ajuste para o problema do ano bissexto de 1900 no Excel
+            if (excelDate < 60) { // Dates before March 1, 1900 are not affected by the bug
+                // No adjustment needed
+            } else if (excelDate === 60) { // March 1, 1900 (the bug makes it Feb 29, 1900)
+                jsDate.setDate(jsDate.getDate() + 1); // Adjust to Mar 1
+            } else { // Dates after March 1, 1900
+                jsDate.setDate(jsDate.getDate() + 1); // Adjust for the skipped day
+            }
+            
+            const month = (jsDate.getMonth() + 1).toString().padStart(2, '0');
+            const year = jsDate.getFullYear().toString();
+            return `${month}/${year}`;
+        }
+        return strValue; // Retorna o valor original se não for MM/YYYY ou um número
+    }
+    const [month, year] = strValue.split('/');
     return `${month.padStart(2, '0')}/${year}`;
 }
 
@@ -53,7 +79,7 @@ async function addTransactionToSheetsDB(transactionData, type) {
     bodyData.descricao = transactionData.description;
     bodyData.timestamp = transactionData.timestamp;
     bodyData.id = transactionData.id;
-    bodyData.mesReferencia = transactionData.mesReferencia;
+    bodyData.mesReferencia = transactionData.mesReferencia; // Já normalizado aqui
 
     if (type === 'income') {
         bodyData.valorEntrada = transactionData.amount;
@@ -89,7 +115,6 @@ async function addTransactionToSheetsDB(transactionData, type) {
 async function deleteTransactionFromSheetsDB(id, type) {
     const targetSheet = type === 'income' ? 'Receitas' : 'Despesas';
     // Correção: Usando os parâmetros column e value para deleção.
-    // A documentação do SheetsDB indica que é preciso especificar a coluna e o valor.
     const deleteUrl = `${SHEETSDB_API_BASE_URL}?sheet=${targetSheet}&column=id&value=${id}`;
 
     try {
@@ -132,7 +157,7 @@ async function getAllTransactionsFromSheetsDB() {
             description: item.descricao,
             amount: parseFloat(item.valorEntrada),
             type: 'income',
-            mesReferencia: normalizeMmYyyy(item.mesReferencia),
+            mesReferencia: normalizeMmYyyy(item.mesReferencia), // Normaliza ao carregar
             timestamp: item.timestamp,
             id: item.id
         }));
@@ -150,7 +175,7 @@ async function getAllTransactionsFromSheetsDB() {
             description: item.descricao,
             amount: parseFloat(item.valorSaida),
             type: 'expense',
-            mesReferencia: normalizeMmYyyy(item.mesReferencia),
+            mesReferencia: normalizeMmYyyy(item.mesReferencia), // Normaliza ao carregar
             timestamp: item.timestamp,
             id: item.id
         }));
@@ -158,8 +183,7 @@ async function getAllTransactionsFromSheetsDB() {
 
         // Ordena todas as transações combinadas por mesReferencia (MM/YYYY) e depois por timestamp (mais recentes primeiro)
         allTransactions.sort((a, b) => {
-            // Converte MM/YYYY para YYYYMM para ordenação correta como string
-            // Pega o ano e o mês, e inverte para YYYYMM para ordenação alfabética funcionar cronologicamente
+            // Converte MM/YYYY para YYYYMM para ordenação correta como número
             const [monthA, yearA] = a.mesReferencia.split('/');
             const mesAnoNumA = parseInt(yearA) * 100 + parseInt(monthA);
 
@@ -288,7 +312,7 @@ async function setupAddPage() {
                 description,
                 amount,
                 type,
-                mesReferencia: normalizeMmYyyy(mesReferencia), // Normaliza o mês antes de enviar
+                mesReferencia: normalizeMmYyyy(mesReferencia), // <--- PRINCIPAL MUDANÇA AQUI!
                 timestamp: new Date().toISOString(), 
                 id: generateUniqueId() 
             };
@@ -319,7 +343,6 @@ async function setupAddPage() {
 
     // Opcional: pré-selecionar o mês atual no seletor de adição
     const currentDate = new Date();
-    // Ajuste aqui para pegar o mês atual do sistema e preencher
     const currentMonthFormatted = `${(currentDate.getMonth() + 1).toString().padStart(2, '0')}/${currentDate.getFullYear()}`; 
     if (monthSelectAdd.querySelector(`option[value="${currentMonthFormatted}"]`)) {
         monthSelectAdd.value = currentMonthFormatted;
