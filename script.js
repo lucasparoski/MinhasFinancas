@@ -87,8 +87,10 @@ async function addTransactionToSheetsDB(transactionData, type) {
 
 // Função para deletar uma transação do SheetsDB
 async function deleteTransactionFromSheetsDB(id, type) {
-    const targetUrl = type === 'income' ? RECEITAS_API_URL : DESPESAS_API_URL;
-    const deleteUrl = `${targetUrl}/id/${id}`;
+    const targetSheet = type === 'income' ? 'Receitas' : 'Despesas';
+    // Correção: Usando os parâmetros column e value para deleção.
+    // A documentação do SheetsDB indica que é preciso especificar a coluna e o valor.
+    const deleteUrl = `${SHEETSDB_API_BASE_URL}?sheet=${targetSheet}&column=id&value=${id}`;
 
     try {
         const response = await fetch(deleteUrl, {
@@ -125,6 +127,7 @@ async function getAllTransactionsFromSheetsDB() {
             throw new Error(`Erro ao buscar receitas: ${incomeResponse.status} - ${errorText}`);
         }
         const incomeData = await incomeResponse.json();
+        console.log("Dados de Receitas Brutos:", incomeData); // Log para depuração
         const incomes = incomeData.map(item => ({
             description: item.descricao,
             amount: parseFloat(item.valorEntrada),
@@ -142,6 +145,7 @@ async function getAllTransactionsFromSheetsDB() {
             throw new Error(`Erro ao buscar despesas: ${expenseResponse.status} - ${errorText}`);
         }
         const expenseData = await expenseResponse.json();
+        console.log("Dados de Despesas Brutos:", expenseData); // Log para depuração
         const expenses = expenseData.map(item => ({
             description: item.descricao,
             amount: parseFloat(item.valorSaida),
@@ -155,15 +159,22 @@ async function getAllTransactionsFromSheetsDB() {
         // Ordena todas as transações combinadas por mesReferencia (MM/YYYY) e depois por timestamp (mais recentes primeiro)
         allTransactions.sort((a, b) => {
             // Converte MM/YYYY para YYYYMM para ordenação correta como string
-            const mesAnoA = a.mesReferencia.split('/')[1] + a.mesReferencia.split('/')[0];
-            const mesAnoB = b.mesReferencia.split('/')[1] + b.mesReferencia.split('/')[0];
+            // Pega o ano e o mês, e inverte para YYYYMM para ordenação alfabética funcionar cronologicamente
+            const [monthA, yearA] = a.mesReferencia.split('/');
+            const mesAnoNumA = parseInt(yearA) * 100 + parseInt(monthA);
 
-            if (mesAnoA === mesAnoB) {
+            const [monthB, yearB] = b.mesReferencia.split('/');
+            const mesAnoNumB = parseInt(yearB) * 100 + parseInt(monthB);
+
+            if (mesAnoNumA === mesAnoNumB) {
+                // Se o mês e ano são os mesmos, ordena por timestamp (mais recente primeiro)
                 return new Date(b.timestamp) - new Date(a.timestamp);
             }
-            return mesAnoB.localeCompare(mesAnoA); // Ordena YYYYMM decrescente
+            // Ordena pelo mesAnoNum decrescente (do mais recente para o mais antigo)
+            return mesAnoNumB - mesAnoNumA;
         });
 
+        console.log("Todas as transações carregadas e processadas:", allTransactions); // Log final para depuração
         return allTransactions;
 
     } catch (error) {
@@ -197,15 +208,14 @@ function addTransactionToDOM(transaction) {
 
         try {
             await deleteTransactionFromSheetsDB(transactionId, transactionType);
+            console.log("Transação deletada do SheetsDB, recarregando DOM...");
             // No caso de deleção, precisamos recarregar e filtrar/exibir as transações apropriadas
-            // Isso será feito pela função de carregamento da página específica
             if (window.location.pathname.includes('view.html')) {
                 loadAndFilterTransactionsViewPage(); // Para a página de visualização
             } else if (window.location.pathname.includes('add.html')) {
                 // Se estiver na página de adição, apenas recarregar para mostrar que sumiu
                 loadAllTransactionsAddPage(); 
             }
-            // Não há resumo nas funções de addTransactionToDOM, updateSummary é chamada após isso.
         } catch (error) {
             console.error("Erro ao deletar transação no DOM:", error);
         }
@@ -251,7 +261,7 @@ async function setupAddPage() {
 
     // Elementos da lista e resumo para feedback em add.html
     transactionsList = document.getElementById('transactions');
-    totalIncomeSpan = document.getElementById('total-income'); // Podem não existir no add.html completo
+    totalIncomeSpan = document.getElementById('total-income'); 
     totalExpenseSpan = document.getElementById('total-expense');
     currentBalanceSpan = document.getElementById('current-balance');
 
@@ -278,10 +288,11 @@ async function setupAddPage() {
                 description,
                 amount,
                 type,
-                mesReferencia, 
+                mesReferencia: normalizeMmYyyy(mesReferencia), // Normaliza o mês antes de enviar
                 timestamp: new Date().toISOString(), 
                 id: generateUniqueId() 
             };
+            console.log("Nova transação a ser adicionada:", newTransaction); // Log para depuração
 
             try {
                 await addTransactionToSheetsDB(newTransaction, type);
@@ -306,11 +317,15 @@ async function setupAddPage() {
         }
     });
 
-     // Opcional: pré-selecionar o mês atual no seletor de adição
+    // Opcional: pré-selecionar o mês atual no seletor de adição
     const currentDate = new Date();
+    // Ajuste aqui para pegar o mês atual do sistema e preencher
     const currentMonthFormatted = `${(currentDate.getMonth() + 1).toString().padStart(2, '0')}/${currentDate.getFullYear()}`; 
     if (monthSelectAdd.querySelector(`option[value="${currentMonthFormatted}"]`)) {
         monthSelectAdd.value = currentMonthFormatted;
+    } else {
+        // Se o mês atual não estiver nas opções, seleciona o primeiro (ou deixa vazio)
+        monthSelectAdd.value = ''; 
     }
 }
 
@@ -325,7 +340,7 @@ async function loadAllTransactionsAddPage() {
     allLoadedTransactions = await getAllTransactionsFromSheetsDB(); // Carrega tudo
 
     if (allLoadedTransactions.length === 0) {
-        console.log('Nenhuma transação encontrada.');
+        console.log('Nenhuma transação encontrada para exibição na página de adição.');
         updateSummary([]);
         return;
     }
@@ -363,7 +378,7 @@ async function loadAndFilterTransactionsViewPage() {
     if (monthSelectView.querySelector(`option[value="${currentMonthFormatted}"]`)) {
         monthSelectView.value = currentMonthFormatted;
     } else {
-        monthSelectView.value = 'all'; // Default para "Todos os Meses"
+        monthSelectView.value = 'all'; // Default para "Todos os Meses" se o mês atual não estiver nas opções
     }
 
     filterTransactionsByMonth(); // Aplica o filtro com o mês selecionado
@@ -373,13 +388,21 @@ function filterTransactionsByMonth() {
     const selectedMonthValue = monthSelectView.value; // Valor do seletor de filtro (MM/YYYY ou 'all')
     let filteredTransactions = [];
 
+    console.log("Mês selecionado no filtro (view.html):", selectedMonthValue); // Log para depuração
+    console.log("Todas as transações disponíveis para filtrar:", allLoadedTransactions); // Log para depuração
+
     if (selectedMonthValue === 'all') {
         filteredTransactions = allLoadedTransactions;
     } else {
-        filteredTransactions = allLoadedTransactions.filter(t => 
-            t.mesReferencia === selectedMonthValue
-        );
+        filteredTransactions = allLoadedTransactions.filter(t => {
+            const match = t.mesReferencia === selectedMonthValue;
+            // Descomente a linha abaixo para uma depuração muito detalhada da comparação:
+            // console.log(`Comparando: '${t.mesReferencia}' com '${selectedMonthValue}' -> ${match}`); 
+            return match;
+        });
     }
+
+    console.log("Transações FILTRADAS para exibição:", filteredTransactions); // Log para depuração
 
     transactionsList.innerHTML = ''; // Limpa a lista exibida
 
@@ -410,7 +433,6 @@ document.addEventListener('DOMContentLoaded', () => {
         setupViewPage();
     } else {
         // Se for index.html ou outra página, não faz nada específico no script.js
-        // Ou você pode adicionar uma lógica para a página inicial aqui se necessário
-        console.log("Página inicial ou desconhecida.");
+        console.log("Página inicial ou desconhecida. Nenhuma lógica específica do script.js aqui.");
     }
 });
