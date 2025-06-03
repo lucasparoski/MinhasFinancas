@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meus Gastos Pessoais</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Minhas Finanças Pessoais</h1>
+            </header>
+
+        <section class="add-transaction">
+            <h2>Adicionar Transação</h2>
+            <form id="transaction-form">
+                <div class="form-group">
+                    <label for="description">Descrição:</label>
+                    <input type="text" id="description" placeholder="Ex: Conta de Luz" required>
+                </div>
+                <div class="form-group">
+                    <label for="amount">Valor:</label>
+                    <input type="number" id="amount" placeholder="Ex: 150.00" step="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label for="type">Tipo:</label>
+                    <select id="type" required>
+                        <option value="expense">Despesa</option>
+                        <option value="income">Receita</option>
+                    </select>
+                </div>
+                <button type="submit">Adicionar</button>
+            </form>
+        </section>
+
+        <section class="summary">
+            <h2>Resumo</h2>
+            <p>Total de Receitas: <span id="total-income">R$ 0.00</span></p>
+            <p>Total de Despesas: <span id="total-expense">R$ 0.00</span></p>
+            <p>Saldo Atual: <span id="current-balance">R$ 0.00</span></p>
+        </section>
+
+        <section class="transaction-list">
+            <h2>Histórico de Transações</h2>
+            <ul id="transactions">
+                </ul>
+        </section>
+    </div>
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>
