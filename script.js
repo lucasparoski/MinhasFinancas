@@ -9,12 +9,15 @@ const DESPESAS_API_URL = `${SHEETSDB_API_BASE_URL}?sheet=Despesas`;
 const transactionForm = document.getElementById('transaction-form');
 const descriptionInput = document.getElementById('description');
 const amountInput = document.getElementById('amount');
+const dateInput = document.getElementById('transaction-date'); // Novo input de data
 const typeInput = document.getElementById('type'); // Este é o select: 'expense' ou 'income'
 const transactionsList = document.getElementById('transactions');
 const totalIncomeSpan = document.getElementById('total-income');
 const totalExpenseSpan = document.getElementById('total-expense');
 const currentBalanceSpan = document.getElementById('current-balance');
+const monthSelect = document.getElementById('month-select'); // Novo seletor de mês
 
+let allLoadedTransactions = []; // Armazena todas as transações carregadas para filtragem
 let totalIncome = 0;
 let totalExpense = 0;
 
@@ -22,30 +25,34 @@ let totalExpense = 0;
 
 // Função para formatar o valor como moeda
 function formatCurrency(value) {
-    // Garante que o valor é um número e formata com duas casas decimais e vírgula
     return `R$ ${parseFloat(value).toFixed(2).replace('.', ',')}`;
 }
 
 // Função para gerar um ID único para a transação
 function generateUniqueId() {
-    // Combina timestamp e string aleatória para alta unicidade
     return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
+}
+
+// Função para obter o nome do mês a partir de uma data (formato 'YYYY-MM-DD')
+function getMonthName(dateString) {
+    // Adiciona T00:00:00 para evitar problemas de fuso horário em alguns navegadores
+    const date = new Date(dateString + 'T00:00:00'); 
+    const options = { year: 'numeric', month: 'long' };
+    return date.toLocaleDateString('pt-BR', options);
 }
 
 // --- 4. FUNÇÕES DE OPERAÇÃO COM SHEETSDB ---
 
 // Função para adicionar uma transação ao SheetsDB
 async function addTransactionToSheetsDB(transactionData, type) {
-    // Seleciona a URL da aba correta (Receitas ou Despesas)
     const targetUrl = type === 'income' ? RECEITAS_API_URL : DESPESAS_API_URL;
     const bodyData = {};
 
-    // Mapeia os dados do formulário para os cabeçalhos da sua planilha Google Sheets
     bodyData.descricao = transactionData.description;
     bodyData.timestamp = transactionData.timestamp;
     bodyData.id = transactionData.id;
+    bodyData.data = transactionData.date; // Adiciona a nova coluna 'data'
 
-    // Define o campo de valor específico para a aba
     if (type === 'income') {
         bodyData.valorEntrada = transactionData.amount;
     } else {
@@ -54,45 +61,41 @@ async function addTransactionToSheetsDB(transactionData, type) {
 
     try {
         const response = await fetch(targetUrl, {
-            method: 'POST', // Usamos POST para adicionar novos dados
+            method: 'POST',
             headers: {
-                'Content-Type': 'application/json', // Informa que o corpo da requisição é JSON
+                'Content-Type': 'application/json',
             },
-            body: JSON.stringify(bodyData), // Converte o objeto JavaScript para string JSON
+            body: JSON.stringify(bodyData),
         });
 
-        // Verifica se a requisição foi bem-sucedida (status 2xx)
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`Erro ao adicionar: ${response.status} - ${errorText}`);
         }
 
-        const result = await response.json(); // Converte a resposta para JSON
+        const result = await response.json();
         console.log("Transação adicionada com sucesso no SheetsDB!", result);
         return result;
     } catch (error) {
         console.error("Erro na requisição POST para SheetsDB:", error);
         alert("Ocorreu um erro ao adicionar a transação. Verifique o console.");
-        throw error; // Re-lança o erro para que o chamador possa tratá-lo
+        throw error;
     }
 }
 
 // Função para deletar uma transação do SheetsDB
 async function deleteTransactionFromSheetsDB(id, type) {
-    // Seleciona a URL da aba correta (Receitas ou Despesas)
     const targetUrl = type === 'income' ? RECEITAS_API_URL : DESPESAS_API_URL;
-    // SheetsDB permite deletar por ID adicionando '/id/SEU_ID' à URL
-    const deleteUrl = `${targetUrl}/id/${id}`;
+    const deleteUrl = `${targetUrl}/id/${id}`; // SheetsDB deleta por ID na URL
 
     try {
         const response = await fetch(deleteUrl, {
-            method: 'DELETE', // Usamos DELETE para remover dados
+            method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
             },
         });
 
-        // Verifica se a requisição foi bem-sucedida
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`Erro ao deletar: ${response.status} - ${errorText}`);
@@ -108,103 +111,109 @@ async function deleteTransactionFromSheetsDB(id, type) {
     }
 }
 
-// Função para buscar todas as transações de ambas as abas do SheetsDB
+// Função para buscar todas as transações do SheetsDB
 async function getAllTransactionsFromSheetsDB() {
     let allTransactions = [];
 
     try {
-        // --- Busca Receitas ---
+        // Busca Receitas
         const incomeResponse = await fetch(RECEITAS_API_URL);
         if (!incomeResponse.ok) {
             const errorText = await incomeResponse.text();
             throw new Error(`Erro ao buscar receitas: ${incomeResponse.status} - ${errorText}`);
         }
-        const incomeData = await incomeResponse.json(); // Converte a resposta das receitas para JSON
+        const incomeData = await incomeResponse.json();
         const incomes = incomeData.map(item => ({
             description: item.descricao,
-            amount: parseFloat(item.valorEntrada), // Converte para número usando o nome da coluna da aba Receitas
+            amount: parseFloat(item.valorEntrada), 
             type: 'income',
+            date: item.data, // Nova propriedade 'data'
             timestamp: item.timestamp,
             id: item.id
         }));
-        allTransactions = allTransactions.concat(incomes); // Adiciona as receitas à lista geral
+        allTransactions = allTransactions.concat(incomes);
 
-        // --- Busca Despesas ---
+        // Busca Despesas
         const expenseResponse = await fetch(DESPESAS_API_URL);
         if (!expenseResponse.ok) {
             const errorText = await expenseResponse.text();
             throw new Error(`Erro ao buscar despesas: ${expenseResponse.status} - ${errorText}`);
         }
-        const expenseData = await expenseResponse.json(); // Converte a resposta das despesas para JSON
+        const expenseData = await expenseResponse.json();
         const expenses = expenseData.map(item => ({
             description: item.descricao,
-            amount: parseFloat(item.valorSaida), // Converte para número usando o nome da coluna da aba Despesas
+            amount: parseFloat(item.valorSaida), 
             type: 'expense',
+            date: item.data, // Nova propriedade 'data'
             timestamp: item.timestamp,
             id: item.id
         }));
-        allTransactions = allTransactions.concat(expenses); // Adiciona as despesas à lista geral
+        allTransactions = allTransactions.concat(expenses);
 
-        // SheetsDB não ordena automaticamente; ordenamos no cliente por timestamp (mais recente primeiro)
-        allTransactions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        // SheetsDB não ordena, então ordenamos no cliente por data e timestamp (mais recentes primeiro)
+        allTransactions.sort((a, b) => {
+            // Combina 'data' e a parte da hora do 'timestamp' para ordenação precisa
+            const dateTimeA = new Date(a.data + 'T' + a.timestamp.split('T')[1]); 
+            const dateTimeB = new Date(b.data + 'T' + b.timestamp.split('T')[1]);
+            return dateTimeB - dateTimeA;
+        });
 
-        return allTransactions; // Retorna todas as transações combinadas e ordenadas
+        return allTransactions;
 
     } catch (error) {
-        console.error("Erro ao buscar transações de SheetsDB:", error);
+        console.error("Erro ao buscar transações:", error);
         alert("Ocorreu um erro ao carregar as transações. Verifique o console e a configuração do SheetsDB/Planilha.");
-        return []; // Retorna um array vazio em caso de erro para evitar quebrar o app
+        return [];
     }
 }
 
 
 // --- 5. FUNÇÕES DE UI E CÁLCULOS ---
 
-// Adiciona uma transação ao DOM (interface do usuário)
 function addTransactionToDOM(transaction) {
     const listItem = document.createElement('li');
-    listItem.classList.add(transaction.type); // Adiciona classe 'expense' ou 'income' para estilização
+    listItem.classList.add(transaction.type);
     
     const sign = transaction.type === 'expense' ? '-' : '+';
     const amountClass = transaction.type === 'expense' ? 'negative' : 'positive';
 
+    // Inclui a data na exibição
     listItem.innerHTML = `
-        ${transaction.description} 
+        <span>${transaction.description} (${transaction.data})</span> 
         <span class="${amountClass}">${sign} ${formatCurrency(transaction.amount)}</span>
         <button class="delete-btn" data-id="${transaction.id}" data-type="${transaction.type}">x</button>
     `;
     transactionsList.appendChild(listItem);
 
-    // Atualiza os totais globais
+    // Atualiza os totais (somente para o mês filtrado atualmente)
     if (transaction.type === 'income') {
         totalIncome += transaction.amount;
     } else {
         totalExpense += transaction.amount;
     }
-    updateSummary(); // Recalcula e exibe o resumo
+    updateSummary();
 
-    // Listener para o botão de deletar cada item individualmente
+    // Adiciona listener para o botão de deletar no DOM
     listItem.querySelector('.delete-btn').addEventListener('click', async (e) => {
-        const transactionId = e.target.dataset.id; // Pega o ID da transação a ser deletada
-        const transactionType = e.target.dataset.type; // Pega o tipo ('expense'/'income') para saber de qual aba deletar
+        const transactionId = e.target.dataset.id;
+        const transactionType = e.target.dataset.type; // Pega o tipo para saber de qual aba deletar
 
         try {
-            await deleteTransactionFromSheetsDB(transactionId, transactionType); // Chama a função de deleção do SheetsDB
-            loadAllTransactions(); // Recarrega todas as transações para atualizar a UI após a deleção
+            await deleteTransactionFromSheetsDB(transactionId, transactionType);
+            loadAndFilterTransactions(); // Recarrega todas as transações e as filtra novamente
         } catch (error) {
             console.error("Erro ao deletar transação no DOM:", error);
         }
     });
 }
 
-// Atualiza os valores de resumo (Receitas, Despesas, Saldo) na UI
 function updateSummary() {
     const balance = totalIncome - totalExpense;
     totalIncomeSpan.textContent = formatCurrency(totalIncome);
     totalExpenseSpan.textContent = formatCurrency(totalExpense);
     currentBalanceSpan.textContent = formatCurrency(balance);
     
-    // Adiciona classes CSS para estilizar o saldo (vermelho para negativo, verde para positivo)
+    // Adiciona classe para saldo positivo/negativo (opcional, para CSS)
     if (balance < 0) {
         currentBalanceSpan.classList.add('negative');
         currentBalanceSpan.classList.remove('positive');
@@ -214,70 +223,132 @@ function updateSummary() {
     }
 }
 
-// Função principal para carregar todas as transações e exibir na UI
-async function loadAllTransactions() {
-    // Reseta a UI e os totais antes de carregar novos dados
+// Função para popular o seletor de meses com base nas transações carregadas
+function populateMonthSelect(transactions) {
+    const months = new Set(); // Usa Set para garantir meses únicos (ex: '2025-06')
+    transactions.forEach(t => {
+        if (t.data && t.data.length >= 7) { // Garante que a data está no formato YYYY-MM-DD
+            months.add(t.data.substring(0, 7)); // Pega 'YYYY-MM'
+        }
+    });
+
+    // Converte Set para Array e ordena em ordem decrescente (do mais novo para o mais antigo)
+    const sortedMonths = Array.from(months).sort((a, b) => b.localeCompare(a));
+
+    monthSelect.innerHTML = '<option value="all">Todos os Meses</option>'; // Opção padrão
+    sortedMonths.forEach(month => {
+        const option = document.createElement('option');
+        option.value = month;
+        option.textContent = getMonthName(month + '-01'); // Cria uma data válida para formatar (ex: '2025-06-01')
+        monthSelect.appendChild(option);
+    });
+
+    // Tenta manter o mês selecionado se já houver um
+    if (monthSelect.dataset.selectedMonth) {
+        monthSelect.value = monthSelect.dataset.selectedMonth;
+    }
+}
+
+// Função para carregar TODAS as transações e, em seguida, filtrar e exibir
+async function loadAndFilterTransactions() {
+    allLoadedTransactions = await getAllTransactionsFromSheetsDB(); // Carrega TUDO do SheetsDB
+    
+    // Armazena o mês atualmente selecionado para tentar restaurá-lo após a recarga
+    const currentSelectedMonth = monthSelect.value;
+    monthSelect.dataset.selectedMonth = currentSelectedMonth; // Guarda em um atributo de dados
+
+    populateMonthSelect(allLoadedTransactions); // Popula o seletor de meses com base em TUDO
+
+    // Se havia um mês selecionado antes de recarregar, tente selecioná-lo novamente
+    if (monthSelect.dataset.selectedMonth) {
+        monthSelect.value = monthSelect.dataset.selectedMonth;
+    }
+
+    filterTransactionsByMonth(); // Chama a função de filtragem inicial (ou para o mês selecionado)
+}
+
+// Função para filtrar e exibir transações com base no mês selecionado
+function filterTransactionsByMonth() {
+    const selectedMonth = monthSelect.value;
+    let filteredTransactions = [];
+
+    if (selectedMonth === 'all') {
+        filteredTransactions = allLoadedTransactions; // Se 'Todos os Meses', exibe tudo
+    } else {
+        // Filtra transações cuja 'data' começa com o mês selecionado (YYYY-MM)
+        filteredTransactions = allLoadedTransactions.filter(t => t.data && t.data.startsWith(selectedMonth));
+    }
+
+    // Reseta a lista e os totais para o novo cálculo
     transactionsList.innerHTML = '';
     totalIncome = 0;
     totalExpense = 0;
 
-    const allTransactions = await getAllTransactionsFromSheetsDB(); // Busca os dados do SheetsDB
-    
-    if (allTransactions.length === 0) {
-        console.log('Nenhuma transação encontrada.');
-        updateSummary(); // Atualiza o resumo mesmo que não haja transações
+    if (filteredTransactions.length === 0) {
+        console.log('Nenhuma transação encontrada para o mês selecionado.');
+        updateSummary();
         return;
     }
 
-    // Adiciona cada transação ao DOM
-    allTransactions.forEach(transaction => {
+    // Ordena as transações filtradas por data e timestamp antes de exibir (mais recentes primeiro)
+    filteredTransactions.sort((a, b) => {
+        const dateTimeA = new Date(a.data + 'T' + a.timestamp.split('T')[1]);
+        const dateTimeB = new Date(b.data + 'T' + b.timestamp.split('T')[1]);
+        return dateTimeB - dateTimeA;
+    });
+
+    // Adiciona as transações filtradas ao DOM
+    filteredTransactions.forEach(transaction => {
         addTransactionToDOM(transaction);
     });
-    // A função updateSummary já é chamada dentro de addTransactionToDOM para cada item,
-    // mas chamá-la aqui novamente garante a atualização final.
-    updateSummary();
+    updateSummary(); // Garante que o resumo é atualizado para o mês filtrado
 }
 
 // --- 6. EVENT LISTENERS ---
 
 // Listener para o evento de envio do formulário de transações
 transactionForm.addEventListener('submit', async (e) => {
-    e.preventDefault(); // Impede o comportamento padrão do formulário (recarregar a página)
+    e.preventDefault(); 
 
-    const description = descriptionInput.value; // Pega a descrição do input
-    const amount = parseFloat(amountInput.value); // Pega o valor e converte para número
-    const type = typeInput.value; // Pega o tipo ('expense' ou 'income') do select
+    const description = descriptionInput.value;
+    const amount = parseFloat(amountInput.value);
+    const date = dateInput.value; // Pega a data do novo input
+    const type = typeInput.value; 
 
-    // Valida se a descrição e o valor foram preenchidos
-    if (description && amount) {
+    // Valida se descrição, valor e data foram preenchidos
+    if (description && amount && date) {
         const newTransaction = {
             description,
             amount,
             type,
+            date, // Inclui a nova propriedade 'data'
             timestamp: new Date().toISOString(), // Gera um timestamp no formato ISO 8601
             id: generateUniqueId() // Gera um ID único para esta transação
         };
 
         try {
-            // Chama a função para adicionar a transação ao SheetsDB
             await addTransactionToSheetsDB(newTransaction, type);
             console.log("Transação adicionada com sucesso no SheetsDB!");
             
-            // Após adicionar, recarrega todas as transações para atualizar a UI
-            loadAllTransactions();
+            // Após adicionar, recarrega TUDO e filtra novamente (mantendo o mês selecionado)
+            await loadAndFilterTransactions(); 
 
             // Limpa o formulário para a próxima entrada
             descriptionInput.value = '';
             amountInput.value = '';
+            dateInput.value = ''; // Limpa o campo de data
             typeInput.value = 'expense'; // Reseta o tipo para 'Despesa'
         } catch (error) {
             console.error("Erro ao adicionar transação ao SheetsDB:", error);
             alert("Ocorreu um erro ao adicionar a transação. Verifique o console.");
         }
     } else {
-        alert('Por favor, preencha todos os campos (descrição e valor).');
+        alert('Por favor, preencha todos os campos (descrição, valor e data).');
     }
 });
 
-// Listener para carregar todas as transações assim que a página é totalmente carregada
-document.addEventListener('DOMContentLoaded', loadAllTransactions);
+// Listener para a mudança no seletor de mês
+monthSelect.addEventListener('change', filterTransactionsByMonth);
+
+// Carregar todas as transações e popular o seletor de meses ao iniciar a página
+document.addEventListener('DOMContentLoaded', loadAndFilterTransactions);
